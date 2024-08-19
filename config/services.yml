@@ -1,0 +1,103 @@
+parameters:
+  version: '%env(APP_VERSION)%'
+  env: '%env(APP_ENV)%'
+
+services:
+  _defaults:
+    autowire: true
+    public: false
+
+  _instanceof:
+    Symfony\Component\Console\Command\Command:
+      tags: ['command']
+    App\Service\FeeStrategy\FeeApplicableInterface:
+      tags: [ 'fee' ]
+    App\Command\Chain\TransactionCommandChainInterface:
+      tags: ['command.chain']
+
+  Symfony\Component\Filesystem\:
+    resource: '../vendor/symfony/filesystem'
+
+  lookup.client:
+      class: GuzzleHttp\Client
+      arguments:
+        - base_uri: '%LOOKUP_URL%'
+          headers:
+            Accept-Version: '%LOOKUP_VERSION%'
+
+  exchange.rate.client:
+    class: GuzzleHttp\Client
+    arguments:
+      -
+        base_uri: '%EXCHANGE_RATE_URL%'
+
+  App\Service\Provider\BinlistProvider:
+    arguments:
+      $client: '@lookup.client'
+      $url: '%LOOKUP_URL%'
+
+
+  Monolog\Handler\StreamHandler:
+    arguments:
+      $stream: 'php://stdout'
+      $level: 'debug'
+
+  Monolog\Logger:
+    arguments:
+      $name: 'app'
+      $handlers:
+        - '@Monolog\Handler\StreamHandler'
+
+  # Register normalizers
+  serializer.normalizer.object:
+    class: Symfony\Component\Serializer\Normalizer\ObjectNormalizer
+
+  serializer.normalizer.transaction:
+    class: App\Service\Normalizer\TransactionNormalizer
+    tags:
+      - { name: 'serializer.normalizer' }
+
+  serializer.normalizer.array:
+    class: Symfony\Component\Serializer\Normalizer\ArrayDenormalizer
+
+  serializer.normalizer.date_time:
+    class: Symfony\Component\Serializer\Normalizer\DateTimeNormalizer
+
+  # Register encoders
+  serializer.encoder.json:
+    class: Symfony\Component\Serializer\Encoder\JsonEncoder
+
+  serializer.encoder.xml:
+    class: Symfony\Component\Serializer\Encoder\XmlEncoder
+
+  Symfony\Component\Serializer\SerializerInterface:
+    class: Symfony\Component\Serializer\Serializer
+    arguments:
+      - ['@serializer.normalizer.object', '@serializer.normalizer.array', '@serializer.normalizer.date_time', '@serializer.normalizer.transaction']
+      - ['@serializer.encoder.json', '@serializer.encoder.xml']
+
+  App\Service\FeeStrategy\FeeResolver:
+    arguments:
+      - !tagged fee
+
+  App\Application:
+    public: true
+    arguments:
+      - !tagged command
+
+  App\Command\Chain\TransactionCommandInvoker:
+    arguments:
+      - !tagged_iterator { tag: command.chain, default_priority_method: executionPriority }
+
+  App\Service\Provider\ExchangeRatesProvider:
+    arguments:
+      - '@exchange.rate.client'
+      - '%EXCHANGE_RATE_URL%'
+      - '%EXCHANGE_RATE_API_KEY%'
+  App\Command\ProcessTransactionCommand: ~
+  App\Command\Chain\BinLookupCommandChain: ~
+  App\Command\Chain\ExchangeRateCommandChain: ~
+  App\Command\Chain\FeeResolutionCommandChain: ~
+
+
+
